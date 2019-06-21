@@ -52,6 +52,7 @@ impl Readable for ConfigParams {
 #[cfg(test)]
 mod test {
     use super::*;
+    use chain_addr::Discrimination;
     use quickcheck::{Arbitrary, Gen, TestResult};
 
     quickcheck! {
@@ -68,6 +69,26 @@ mod test {
                     .take(size)
                     .collect(),
             )
+        }
+    }
+
+    impl ConfigParams {
+        pub fn arbitrary_all_params(g: &mut impl Gen, discrimination: Discrimination) -> Self {
+            ConfigParams(vec![
+                ConfigParam::Discrimination(discrimination),
+                ConfigParam::Block0Date(Arbitrary::arbitrary(g)),
+                ConfigParam::ConsensusVersion(Arbitrary::arbitrary(g)),
+                ConfigParam::SlotsPerEpoch(Arbitrary::arbitrary(g)),
+                ConfigParam::SlotDuration(Arbitrary::arbitrary(g)),
+                ConfigParam::EpochStabilityDepth(Arbitrary::arbitrary(g)),
+                ConfigParam::ConsensusGenesisPraosActiveSlotsCoeff(Arbitrary::arbitrary(g)),
+                ConfigParam::MaxNumberOfTransactionsPerBlock(Arbitrary::arbitrary(g)),
+                ConfigParam::BftSlotsRatio(Arbitrary::arbitrary(g)),
+                ConfigParam::AddBftLeader(Arbitrary::arbitrary(g)),
+                ConfigParam::LinearFee(Arbitrary::arbitrary(g)),
+                ConfigParam::ProposalExpiration(Arbitrary::arbitrary(g)),
+                ConfigParam::KESUpdateSpeed(Arbitrary::arbitrary(g)),
+            ])
         }
     }
 }

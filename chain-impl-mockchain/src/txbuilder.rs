@@ -288,13 +288,11 @@ impl TransactionFinalizer {
 mod tests {
     use super::*;
     use crate::fee::LinearFee;
+    use crate::test_utils;
     use crate::transaction::{Input, NoExtra, INPUT_PTR_SIZE};
     use chain_addr::Address;
     use quickcheck::{Arbitrary, Gen, TestResult};
     use quickcheck_macros::quickcheck;
-    use rand::distributions::uniform::{SampleUniform, Uniform};
-    use rand::Rng;
-    use std::iter;
 
     #[quickcheck]
     fn tx_builder_never_creates_unbalanced_tx(
@@ -389,8 +387,8 @@ mod tests {
     impl Arbitrary for ArbitraryInputs {
         fn arbitrary<G: Gen>(gen: &mut G) -> Self {
             let value = u64::arbitrary(gen);
-            let count = arbitrary_range(gen, 0..=255);
-            let inputs = split_value(gen, value, count)
+            let count = test_utils::arbitrary_range(gen, 0..=255);
+            let inputs = test_utils::arbitrary_split_value(gen, value, count)
                 .into_iter()
                 .map(|value| arbitrary_input(gen, value))
                 .collect();
@@ -404,8 +402,8 @@ mod tests {
     impl Arbitrary for ArbitraryOutputs {
         fn arbitrary<G: Gen>(gen: &mut G) -> Self {
             let value = u64::arbitrary(gen);
-            let count = arbitrary_range(gen, 0..=255);
-            let outputs = split_value(gen, value, count)
+            let count = test_utils::arbitrary_range(gen, 0..=255);
+            let outputs = test_utils::arbitrary_split_value(gen, value, count)
                 .into_iter()
                 .map(|value| (Address::arbitrary(gen), Value(value)))
                 .collect();
@@ -423,55 +421,55 @@ mod tests {
         }
     }
 
-    fn split_value(gen: &mut impl Gen, value: u64, parts: u16) -> Vec<u64> {
-        let mut in_values: Vec<_> = iter::once(0)
-            .chain(iter::repeat_with(|| arbitrary_range(gen, 0..=value)))
-            .take(parts as usize)
-            .chain(iter::once(value))
-            .collect();
-        in_values.sort();
-        in_values.windows(2).map(|pair| pair[1] - pair[0]).collect()
-    }
+    // fn split_value(gen: &mut impl Gen, value: u64, parts: u16) -> Vec<u64> {
+    //     let mut in_values: Vec<_> = iter::once(0)
+    //         .chain(iter::repeat_with(|| arbitrary_range(gen, 0..=value)))
+    //         .take(parts as usize)
+    //         .chain(iter::once(value))
+    //         .collect();
+    //     in_values.sort();
+    //     in_values.windows(2).map(|pair| pair[1] - pair[0]).collect()
+    // }
 
-    fn arbitrary_range<T: SampleUniform>(gen: &mut impl Gen, range: impl Into<Uniform<T>>) -> T {
-        gen.sample(range.into())
-    }
+    // fn arbitrary_range<T: SampleUniform>(gen: &mut impl Gen, range: impl Into<Uniform<T>>) -> T {
+    //     gen.sample(range.into())
+    // }
 
-    #[quickcheck]
-    fn split_value_splits_whole_value(split_value: ArbitrarySplitValue) -> () {
-        assert_eq!(
-            split_value.parts,
-            split_value.split.len(),
-            "Invalid split length"
-        );
-        assert_eq!(
-            split_value.value,
-            split_value.split.iter().sum(),
-            "Invalid split sum"
-        );
-    }
+    // #[quickcheck]
+    // fn split_value_splits_whole_value(split_value: ArbitrarySplitValue) -> () {
+    //     assert_eq!(
+    //         split_value.parts,
+    //         split_value.split.len(),
+    //         "Invalid split length"
+    //     );
+    //     assert_eq!(
+    //         split_value.value,
+    //         split_value.split.iter().sum(),
+    //         "Invalid split sum"
+    //     );
+    // }
 
-    #[derive(Clone, Debug)]
-    struct ArbitrarySplitValue {
-        value: u64,
-        parts: usize,
-        split: Vec<u64>,
-    }
+    // #[derive(Clone, Debug)]
+    // struct ArbitrarySplitValue {
+    //     value: u64,
+    //     parts: usize,
+    //     split: Vec<u64>,
+    // }
 
-    impl Arbitrary for ArbitrarySplitValue {
-        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
-            let value = u64::arbitrary(gen);
-            let parts = u16::arbitrary(gen);
-            let split = split_value(gen, value, parts);
-            let value = match parts {
-                0 => 0,
-                _ => value,
-            };
-            ArbitrarySplitValue {
-                value,
-                parts: parts as usize,
-                split,
-            }
-        }
-    }
+    // impl Arbitrary for ArbitrarySplitValue {
+    //     fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+    //         let value = u64::arbitrary(gen);
+    //         let parts = u16::arbitrary(gen);
+    //         let split = split_value(gen, value, parts);
+    //         let value = match parts {
+    //             0 => 0,
+    //             _ => value,
+    //         };
+    //         ArbitrarySplitValue {
+    //             value,
+    //             parts: parts as usize,
+    //             split,
+    //         }
+    //     }
+    // }
 }

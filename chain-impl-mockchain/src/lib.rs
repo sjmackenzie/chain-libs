@@ -24,11 +24,10 @@ pub mod multisig;
 pub mod multiverse;
 pub mod setting;
 pub mod stake;
+#[cfg(test)]
+mod test_utils;
 pub mod transaction;
 pub mod txbuilder;
 pub mod update;
 pub mod utxo;
 pub mod value;
-
-#[cfg(test)]
-mod tests {}

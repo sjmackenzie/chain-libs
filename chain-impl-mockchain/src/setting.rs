@@ -116,7 +116,6 @@ impl Settings {
                 }
             }
         }
-
         Ok(new_state)
     }
 }

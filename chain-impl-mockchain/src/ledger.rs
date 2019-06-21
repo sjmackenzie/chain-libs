@@ -853,3 +853,88 @@ fn input_account_verify(
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::message::ConfigParams;
+    use crate::test_utils;
+    use quickcheck::{Arbitrary, Gen};
+    use quickcheck_macros::quickcheck;
+    use rand::seq::IteratorRandom;
+    use std::fmt::{self, Debug, Formatter};
+    use std::iter;
+
+    #[quickcheck]
+    fn test_of_test(arbitrary_ledger: ArbitraryLedger) {
+        let ArbitraryLedger { ledger, ledger_tx_subset } = arbitrary_ledger;
+        // let tx_msg = Message::Transaction(AuthenticatedTransaction {
+        //     transaction: Transaction {
+        //         inputs: ledger_tx_subset,
+        //         outputs: vec![],
+        //         extra: NoExtra,
+        //     },
+        //     witnesses: vec![],
+        // })
+        // let inputs =
+    }
+
+    #[derive(Clone)]
+    struct ArbitraryLedger {
+        ledger: Ledger,
+        ledger_tx_subset: Vec<AuthenticatedTransaction<Address, NoExtra>>,
+    }
+
+    impl Debug for ArbitraryLedger {
+        fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
+            write!(formatter, "ArbitraryLedger")
+        }
+    }
+
+    impl Arbitrary for ArbitraryLedger {
+        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+            let discr = Discrimination::arbitrary(gen);
+            let txs = arbitrary_txs(gen, discr);
+            let init_msg = Message::Initial(ConfigParams::arbitrary_all_params(gen, discr));
+            let txs_msgs = txs.iter().cloned().map(Message::Transaction);
+            let hash = HeaderHash::arbitrary(gen);
+            let messages: Vec<_> = iter::once(init_msg).chain(txs_msgs).collect();
+            let ledger = Ledger::new(hash, &messages).expect("Failed to create arbitrary ledger");
+            let ledger_tx_subset_size = test_utils::arbitrary_range(gen, 1..=txs.len().min(255));
+            let ledger_tx_subset = txs.into_iter().choose_multiple(gen, ledger_tx_subset_size);
+            ArbitraryLedger { ledger, ledger_tx_subset }
+        }
+    }
+
+    fn arbitrary_txs(
+        gen: &mut impl Gen,
+        discrimination: Discrimination,
+    ) -> Vec<AuthenticatedTransaction<Address, NoExtra>> {
+        let tx_value = test_utils::arbitrary_range(gen, 1..u64::max_value());;
+        let tx_count = test_utils::arbitrary_range(gen, 1..1000);
+        test_utils::arbitrary_split_value(gen, tx_value, tx_count)
+            .into_iter()
+            .filter(|value| *value > 0)
+            .map(|value| arbitrary_tx(gen, Value(value), discrimination))
+            .collect()
+    }
+
+    fn arbitrary_tx(
+        gen: &mut impl Gen,
+        value: Value,
+        discrimination: Discrimination,
+    ) -> AuthenticatedTransaction<Address, NoExtra> {
+        let output = Output {
+            address: Address(discrimination, Kind::arbitrary_initial_ledger(gen)),
+            value,
+        };
+        AuthenticatedTransaction {
+            transaction: Transaction {
+                inputs: vec![],
+                outputs: vec![output],
+                extra: NoExtra,
+            },
+            witnesses: vec![],
+        }
+    }
+}

@@ -262,3 +262,23 @@ mod test {
         }
     }
 }
+
+#[cfg(feature = "property-test-api")]
+mod property_test_api {
+    use super::*;
+    use quickcheck::{Arbitrary, Gen};
+
+    impl<A> Arbitrary for PublicKey<A>
+    where
+        A: AsymmetricPublicKey + 'static,
+        A::Public: Send,
+    {
+        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+            let mut key = vec![0; A::PUBLIC_KEY_SIZE];
+            gen.fill_bytes(&mut key);
+            A::public_from_binary(&key)
+                .map(PublicKey)
+                .expect("Failed to generate public key")
+        }
+    }
+}

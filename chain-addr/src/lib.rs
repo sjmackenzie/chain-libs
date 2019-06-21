@@ -640,3 +640,36 @@ mod test {
         }
     }
 }
+
+#[cfg(feature = "property-test-api")]
+mod property_test_api {
+    use super::*;
+    use quickcheck::{Arbitrary, Gen};
+
+    impl Arbitrary for Kind {
+        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+            match gen.next_u64() % 4 {
+                0 => Kind::Single(PublicKey::arbitrary(gen)),
+                1 => Kind::Group(PublicKey::arbitrary(gen), PublicKey::arbitrary(gen)),
+                2 => Kind::Account(PublicKey::arbitrary(gen)),
+                3 => {
+                    let mut key = [0; 32];
+                    gen.fill_bytes(&mut key);
+                    Kind::Multisig(key)
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Kind {
+        pub fn arbitrary_initial_ledger(gen: &mut impl Gen) -> Self {
+            match gen.next_u64() % 3 {
+                0 => Kind::Single(PublicKey::arbitrary(gen)),
+                1 => Kind::Group(PublicKey::arbitrary(gen), PublicKey::arbitrary(gen)),
+                2 => Kind::Account(PublicKey::arbitrary(gen)),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
