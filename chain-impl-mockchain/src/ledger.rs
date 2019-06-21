@@ -858,16 +858,18 @@ fn input_account_verify(
 mod test {
     use super::*;
     use crate::message::ConfigParams;
+    use crate::txbuilder::TransactionBuilder;
     use crate::test_utils;
+    use chain_crypto::{Ed25519, SecretKey};
     use quickcheck::{Arbitrary, Gen};
     use quickcheck_macros::quickcheck;
-    use rand::seq::IteratorRandom;
+    use rand::seq::{IteratorRandom, SliceRandom};
     use std::fmt::{self, Debug, Formatter};
     use std::iter;
 
     #[quickcheck]
-    fn test_of_test(arbitrary_ledger: ArbitraryLedger) {
-        let ArbitraryLedger { ledger, ledger_tx_subset } = arbitrary_ledger;
+    fn test_of_test(ledger_and_tx: LedgerAndTx) {
+        // let LedgerAndTx { ledger } = ledger_and_tx;
         // let tx_msg = Message::Transaction(AuthenticatedTransaction {
         //     transaction: Transaction {
         //         inputs: ledger_tx_subset,
@@ -895,13 +897,23 @@ mod test {
         fn arbitrary<G: Gen>(gen: &mut G) -> Self {
             let discr = Discrimination::arbitrary(gen);
             let txs = arbitrary_txs(gen, discr);
-            let init_msg = Message::Initial(ConfigParams::arbitrary_all_params(gen, discr));
-            let txs_msgs = txs.iter().cloned().map(Message::Transaction);
-            let hash = HeaderHash::arbitrary(gen);
-            let messages: Vec<_> = iter::once(init_msg).chain(txs_msgs).collect();
-            let ledger = Ledger::new(hash, &messages).expect("Failed to create arbitrary ledger");
-            let ledger_tx_subset_size = test_utils::arbitrary_range(gen, 1..=txs.len().min(255));
+            let ledger = arbitrary_ledger(gen, discr, &txs);
+            let ledger_tx_subset_size = test_utils::arbitrary_range(gen, 1..=txs.len().min(256));
             let ledger_tx_subset = txs.into_iter().choose_multiple(gen, ledger_tx_subset_size);
+
+            // let mut tx_builder = TransactionBuilder::new();
+            // for tx in ledger_tx_subset {
+            //     let Output {address, value } = tx.transaction.outputs[0];
+            //     match address.kind {
+            //         Kind::Account(key)
+            //     }
+            //     let input = Input {
+            //         index_or_account: u8,
+            //         value,
+            //         pub input_ptr: [u8; INPUT_PTR_SIZE],
+            //     }
+            // }
+
             ArbitraryLedger { ledger, ledger_tx_subset }
         }
     }
@@ -917,6 +929,145 @@ mod test {
             .filter(|value| *value > 0)
             .map(|value| arbitrary_tx(gen, Value(value), discrimination))
             .collect()
+    }
+
+    #[derive(Clone)]
+    struct LedgerAndTx {
+        ledger: Ledger,
+        signed_tx: AuthenticatedTransaction<Address, NoExtra>,
+        dyn_params: LedgerParameters,
+    }
+
+    impl Debug for LedgerAndTx {
+        fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
+            write!(formatter, "LedgerAndTx")
+        }
+    }
+
+    impl Arbitrary for LedgerAndTx {
+        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+            let tx_items = TxItems::arbitrary(gen);
+            let ledger = tx_items.to_ledger(gen);
+            let (signed_tx, dyn_params) = tx_items.to_tx(gen);
+            Self {
+                ledger,
+                signed_tx,
+                dyn_params
+            }
+        }
+    }
+
+    struct TxItems {
+        tx_items: Vec<TxItem>,
+        discr: Discrimination,
+    }
+
+    impl TxItems {
+        fn arbitrary(gen: &mut impl Gen) -> Self {
+            let tx_value = test_utils::arbitrary_range(gen, 1..u64::max_value());;
+            let tx_count = test_utils::arbitrary_range(gen, 1..1000);
+            let tx_items = test_utils::arbitrary_split_value(gen, tx_value, tx_count)
+                .into_iter()
+                .filter(|value| *value > 0)
+                .map(|value| TxItem::arbitrary(gen, value))
+                .collect();
+            TxItems {
+                tx_items,
+                discr: Discrimination::arbitrary(gen),
+            }
+        }
+
+        fn to_ledger(&self, gen: &mut impl Gen) -> Ledger {
+            let hash = HeaderHash::arbitrary(gen);
+            let messages = self.to_init_msgs(gen);
+            Ledger::new(hash, &messages).expect("Failed to create arbitrary ledger")
+        }
+
+        fn to_init_msgs(&self, gen: &mut impl Gen) -> Vec<Message> {
+            let init_msg = Message::Initial(ConfigParams::arbitrary_all_params(gen, self.discr));
+            let txs_msgs = self.tx_items.iter().map(|tx_item| tx_item.to_init_tx_msg(self.discr));
+            iter::once(init_msg).chain(txs_msgs).collect()
+        }
+
+        fn to_tx(&self, gen: &mut impl Gen) -> (AuthenticatedTransaction<Address, NoExtra>, LedgerParameters,) {
+            let tx_items = self.tx_items_for_input(gen);
+            TransactionBuilder::new()
+            unimplemented!()
+        }
+
+        fn tx_items_for_input(&self, gen: &mut impl Gen) -> Vec<TxItem> {
+            let max_tx_subset_size = self.tx_items.len().min(256);
+            let tx_subset_size = test_utils::arbitrary_range(gen, 1..=max_tx_subset_size);
+            let tx_subset = self.tx_items.iter().choose_multiple(gen, tx_subset_size);
+            tx_subset.into_iter().map(|tx_item| tx_item.with_lowered_value(gen)).collect()
+        }
+    }
+
+    struct TxItem {
+        tx_type: TxType,
+        value: Value,
+    }
+
+    impl TxItem {
+        fn arbitrary(gen: &mut impl Gen, value: u64) -> Self {
+            TxItem {
+                tx_type: TxType::arbitrary(gen),
+                value: Value(value)
+            }
+        }
+
+        fn to_output(&self, discr: Discrimination) -> Output<Address> {
+            Output {
+                address: Address(discr, self.tx_type.to_kind()),
+                value: self.value,
+            }
+        }
+
+        fn to_init_tx_msg(&self, discr: Discrimination) -> Message {
+            let tx = AuthenticatedTransaction {
+                transaction: Transaction {
+                    inputs: vec![],
+                    outputs: vec![self.to_output(discr)],
+                    extra: NoExtra,
+                },
+                witnesses: vec![],
+            };
+            Message::Transaction(tx)
+        }
+
+        fn with_lowered_value(&self, gen: &mut impl Gen) -> Self {
+            let lowered_value = test_utils::arbitrary_range(gen, 1..self.value.0);
+            TxItem {
+                tx_type: self.tx_type.clone(),
+                value: Value(lowered_value),
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    enum TxType {
+        Single(SecretKey<Ed25519>),
+        Group(SecretKey<Ed25519>),
+        Account(SecretKey<Ed25519>),
+    }
+
+    impl TxType {
+        fn arbitrary(gen: &mut impl Gen) -> Self {
+            match gen.next_u64() % 3 {
+                0 => TxType::Single(SecretKey::arbitrary(gen)),
+                1 => TxType::Group(SecretKey::arbitrary(gen)),
+                2 => TxType::Account(SecretKey::arbitrary(gen)),
+                _ => unreachable!(),
+            }
+        }
+
+        fn to_kind(&self) -> Kind {
+            match self {
+                TxType::Single(key) => Kind::Single(key.to_public()),
+                TxType::Group(key) => Kind::Group(key.to_public(), key.to_public()),
+                TxType::Account(key) => Kind::Account(key.to_public()),
+            }
+        }
     }
 
     fn arbitrary_tx(
@@ -936,5 +1087,13 @@ mod test {
             },
             witnesses: vec![],
         }
+    }
+
+    fn arbitrary_ledger(gen: &mut impl Gen, discr: Discrimination, txs: &[AuthenticatedTransaction<Address, NoExtra>]) -> Ledger {
+        let hash = HeaderHash::arbitrary(gen);
+        let init_msg = Message::Initial(ConfigParams::arbitrary_all_params(gen, discr));
+        let txs_msgs = txs.iter().cloned().map(Message::Transaction);
+        let messages: Vec<_> = iter::once(init_msg).chain(txs_msgs).collect();
+        Ledger::new(hash, &messages).expect("Failed to create arbitrary ledger")
     }
 }
