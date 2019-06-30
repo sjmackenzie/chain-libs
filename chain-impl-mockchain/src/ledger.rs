@@ -857,8 +857,10 @@ fn input_account_verify(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::accounting::account::SpendingCounter;
+    use crate::key::EitherEd25519SecretKey;
     use crate::message::ConfigParams;
-    use crate::txbuilder::TransactionBuilder;
+    use crate::txbuilder::{GeneratedTransaction, OutputPolicy, TransactionBuilder, TransactionFinalizer};
     use crate::test_utils;
     use chain_crypto::{Ed25519, SecretKey};
     use quickcheck::{Arbitrary, Gen};
@@ -881,55 +883,60 @@ mod test {
         // let inputs =
     }
 
-    #[derive(Clone)]
-    struct ArbitraryLedger {
-        ledger: Ledger,
-        ledger_tx_subset: Vec<AuthenticatedTransaction<Address, NoExtra>>,
-    }
+    // #[derive(Clone)]
+    // struct ArbitraryLedger {
+    //     ledger: Ledger,
+    //     tx: AuthenticatedTransaction<Address, NoExtra>,
+    //     ledger_params: LedgerParameters,
+    // }
 
-    impl Debug for ArbitraryLedger {
-        fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
-            write!(formatter, "ArbitraryLedger")
-        }
-    }
+    // impl Debug for ArbitraryLedger {
+    //     fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
+    //         write!(formatter, "ArbitraryLedger")
+    //     }
+    // }
 
-    impl Arbitrary for ArbitraryLedger {
-        fn arbitrary<G: Gen>(gen: &mut G) -> Self {
-            let discr = Discrimination::arbitrary(gen);
-            let txs = arbitrary_txs(gen, discr);
-            let ledger = arbitrary_ledger(gen, discr, &txs);
-            let ledger_tx_subset_size = test_utils::arbitrary_range(gen, 1..=txs.len().min(256));
-            let ledger_tx_subset = txs.into_iter().choose_multiple(gen, ledger_tx_subset_size);
+    // impl Arbitrary for ArbitraryLedger {
+    //     fn arbitrary<G: Gen>(gen: &mut G) -> Self {
+    //         let discr = Discrimination::arbitrary(gen);
+    //         let txs = arbitrary_txs(gen, discr);
+    //         let ledger = arbitrary_ledger(gen, discr, &txs);
+    //         let ledger_tx_subset_size = test_utils::arbitrary_range(gen, 1..=txs.len().min(256));
+    //         let ledger_tx_subset = txs.into_iter().choose_multiple(gen, ledger_tx_subset_size);
 
-            // let mut tx_builder = TransactionBuilder::new();
-            // for tx in ledger_tx_subset {
-            //     let Output {address, value } = tx.transaction.outputs[0];
-            //     match address.kind {
-            //         Kind::Account(key)
-            //     }
-            //     let input = Input {
-            //         index_or_account: u8,
-            //         value,
-            //         pub input_ptr: [u8; INPUT_PTR_SIZE],
-            //     }
-            // }
+    //         // let mut tx_builder = TransactionBuilder::new();
+    //         // for tx in ledger_tx_subset {
+    //         //     let Output {address, value } = tx.transaction.outputs[0];
+    //         //     match address.kind {
+    //         //         Kind::Account(key)
+    //         //     }
+    //         //     let input = Input {
+    //         //         index_or_account: u8,
+    //         //         value,
+    //         //         pub input_ptr: [u8; INPUT_PTR_SIZE],
+    //         //     }
+    //         // }
 
-            ArbitraryLedger { ledger, ledger_tx_subset }
-        }
-    }
+    //         let tx_items = TxItems::arbitrary(gen);
+    //         let ledger = tx_items.to_ledger(gen);
+    //         let (tx, ledger_params) = tx_items.to_tx(gen);
 
-    fn arbitrary_txs(
-        gen: &mut impl Gen,
-        discrimination: Discrimination,
-    ) -> Vec<AuthenticatedTransaction<Address, NoExtra>> {
-        let tx_value = test_utils::arbitrary_range(gen, 1..u64::max_value());;
-        let tx_count = test_utils::arbitrary_range(gen, 1..1000);
-        test_utils::arbitrary_split_value(gen, tx_value, tx_count)
-            .into_iter()
-            .filter(|value| *value > 0)
-            .map(|value| arbitrary_tx(gen, Value(value), discrimination))
-            .collect()
-    }
+    //         ArbitraryLedger { ledger, tx, ledger_params }
+    //     }
+    // }
+
+    // fn arbitrary_txs(
+    //     gen: &mut impl Gen,
+    //     discrimination: Discrimination,
+    // ) -> Vec<AuthenticatedTransaction<Address, NoExtra>> {
+    //     let tx_value = test_utils::arbitrary_range(gen, 1..u64::max_value());;
+    //     let tx_count = test_utils::arbitrary_range(gen, 1..1000);
+    //     test_utils::arbitrary_split_value(gen, tx_value, tx_count)
+    //         .into_iter()
+    //         .filter(|value| *value > 0)
+    //         .map(|value| arbitrary_tx(gen, Value(value), discrimination))
+    //         .collect()
+    // }
 
     #[derive(Clone)]
     struct LedgerAndTx {
@@ -948,7 +955,7 @@ mod test {
         fn arbitrary<G: Gen>(gen: &mut G) -> Self {
             let tx_items = TxItems::arbitrary(gen);
             let ledger = tx_items.to_ledger(gen);
-            let (signed_tx, dyn_params) = tx_items.to_tx(gen);
+            let (signed_tx, dyn_params) = tx_items.to_tx(gen, ledger.static_params.block0_initial_hash);
             Self {
                 ledger,
                 signed_tx,
@@ -989,10 +996,31 @@ mod test {
             iter::once(init_msg).chain(txs_msgs).collect()
         }
 
-        fn to_tx(&self, gen: &mut impl Gen) -> (AuthenticatedTransaction<Address, NoExtra>, LedgerParameters,) {
+        fn to_tx(&self, gen: &mut impl Gen, header_hash: HeaderHash) -> (AuthenticatedTransaction<Address, NoExtra>, LedgerParameters,) {
             let tx_items = self.tx_items_for_input(gen);
-            TransactionBuilder::new()
-            unimplemented!()
+            let mut tx_builder = TransactionBuilder::new();
+            for tx_item in &tx_items {
+                tx_builder.add_input(&tx_item.to_input());
+            }
+            let total_value = Value::sum(tx_items.iter().map(|tx_item| tx_item.value)).unwrap();
+            let fees = LinearFee::new(total_value.0, 0, 0);
+            let (_, tx) = tx_builder.finalize(fees, OutputPolicy::Forget).expect("Failed to finalize TX");
+            let mut tx_finalizer = TransactionFinalizer::new_trans(tx);
+              let tx_id =   tx_finalizer.get_txid();
+              tx_items.iter().map(|tx_item| tx_item.to_witness(header_hash, tx_id))
+                .enumerate()
+                .for_each(|(index, witness)| tx_finalizer.set_witness(index, witness).unwrap());
+            // for (index, tx_item) in tx_items.iter().enumerate() {
+            //     let witness = tx_item.to_witness(header_hash, tx_id);
+            //     tx_finalizer.set_witness(index, witness);
+            // }
+            let auth_tx = match tx_finalizer.build().unwrap() {
+                GeneratedTransaction::Type1(auth_tx) => auth_tx,
+                _ => unreachable!(),
+            };
+            (auth_tx, LedgerParameters { fees })
+            // witnesses.push(tx_item.to_witness());
+            // unimplemented!() // TODO add outputs, witnesses
         }
 
         fn tx_items_for_input(&self, gen: &mut impl Gen) -> Vec<TxItem> {
@@ -1016,18 +1044,16 @@ mod test {
             }
         }
 
-        fn to_output(&self, discr: Discrimination) -> Output<Address> {
-            Output {
-                address: Address(discr, self.tx_type.to_kind()),
-                value: self.value,
-            }
+        fn to_address(&self, discr: Discrimination) -> Address {
+                Address(discr, self.tx_type.to_kind())
         }
 
         fn to_init_tx_msg(&self, discr: Discrimination) -> Message {
+            // TODO use builder
             let tx = AuthenticatedTransaction {
                 transaction: Transaction {
                     inputs: vec![],
-                    outputs: vec![self.to_output(discr)],
+                    outputs: vec![Output { address: self.to_address(discr), value: self.value }],
                     extra: NoExtra,
                 },
                 witnesses: vec![],
@@ -1042,11 +1068,19 @@ mod test {
                 value: Value(lowered_value),
             }
         }
+
+        fn to_input(&self) -> Input {
+            self.tx_type.to_input(self.value)
+        }
+
+        fn to_witness(&self, block0: HeaderHash, transaction_id: TransactionId) -> Witness {
+            self.tx_type.to_witness(block0, transaction_id)
+        }
     }
 
     #[derive(Clone)]
     enum TxType {
-        Single(SecretKey<Ed25519>),
+        Single(SecretKey<Ed25519>), //TODO UtxoPointer
         Group(SecretKey<Ed25519>),
         Account(SecretKey<Ed25519>),
     }
@@ -1066,6 +1100,29 @@ mod test {
                 TxType::Single(key) => Kind::Single(key.to_public()),
                 TxType::Group(key) => Kind::Group(key.to_public(), key.to_public()),
                 TxType::Account(key) => Kind::Account(key.to_public()),
+            }
+        }
+
+        fn to_input(&self, value: Value) -> Input {
+            match self {
+                TxType::Single(key) => Input::from_account_public_key(key.to_public(), value),
+                TxType::Account(key) => Input::from_account_public_key(key.to_public(), value),
+                TxType::Group(key) => Input::from_account_public_key(key.to_public(), value),
+            }
+        }
+
+        fn to_witness(&self, block0: HeaderHash, transaction_id: TransactionId) -> Witness {
+            match self {
+                TxType::Single(key) =>
+                    Witness::new_account(&block0, &transaction_id, &SpendingCounter::zero(),
+                        &EitherEd25519SecretKey::Normal(key.clone()))
+                ,
+                TxType::Account(key) =>
+                    Witness::new_account(&block0, &transaction_id, &SpendingCounter::zero(),
+                        &EitherEd25519SecretKey::Normal(key.clone())),
+                TxType::Group(key) =>
+                    Witness::new_account(&block0, &transaction_id, &SpendingCounter::zero(),
+                        &EitherEd25519SecretKey::Normal(key.clone())),
             }
         }
     }
