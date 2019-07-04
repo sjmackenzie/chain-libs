@@ -870,12 +870,12 @@ mod test {
     use chain_crypto::{Ed25519, SecretKey};
     use quickcheck::{Arbitrary, Gen};
     use quickcheck_macros::quickcheck;
-    use rand::seq::{IteratorRandom, SliceRandom};
+    use rand::seq::IteratorRandom;
     use std::fmt::{self, Debug, Formatter};
     use std::iter;
 
     #[quickcheck]
-    fn test_of_test(ledger_and_tx: LedgerAndTx) {
+    fn ledger_value_is_constant_over_txs(ledger_and_tx: LedgerAndTx) {
         let value_before = ledger_and_tx.ledger.utxo_total_value().unwrap();
 
         let result = ledger_and_tx
@@ -995,7 +995,7 @@ mod test {
                 _ => unreachable!(),
             };
             (auth_tx, LedgerParameters { fees })
-            // unimplemented!() // TODO add outputs
+            // TODO add outputs
         }
 
         fn tx_items_for_input(&self, gen: &mut impl Gen) -> Vec<TxItem> {
@@ -1060,15 +1060,14 @@ mod test {
 
     #[derive(Clone)]
     enum TxType {
-        Single(SecretKey<Ed25519>), //TODO UtxoPointer
+        Single(SecretKey<Ed25519>),
         Group(SecretKey<Ed25519>),
         Account(SecretKey<Ed25519>),
     }
 
     impl TxType {
         fn arbitrary(gen: &mut impl Gen) -> Self {
-            match gen.next_u64() % 1 + 2 {
-                // TODO non-account ones
+            match 2 { // gen.next_u64() % 1 + 2 { // TODO non-account ones
                 0 => TxType::Single(SecretKey::arbitrary(gen)),
                 1 => TxType::Group(SecretKey::arbitrary(gen)),
                 2 => TxType::Account(SecretKey::arbitrary(gen)),
@@ -1114,36 +1113,5 @@ mod test {
                 ),
             }
         }
-    }
-
-    fn arbitrary_tx(
-        gen: &mut impl Gen,
-        value: Value,
-        discrimination: Discrimination,
-    ) -> AuthenticatedTransaction<Address, NoExtra> {
-        let output = Output {
-            address: Address(discrimination, Kind::arbitrary_initial_ledger(gen)),
-            value,
-        };
-        AuthenticatedTransaction {
-            transaction: Transaction {
-                inputs: vec![],
-                outputs: vec![output],
-                extra: NoExtra,
-            },
-            witnesses: vec![],
-        }
-    }
-
-    fn arbitrary_ledger(
-        gen: &mut impl Gen,
-        discr: Discrimination,
-        txs: &[AuthenticatedTransaction<Address, NoExtra>],
-    ) -> Ledger {
-        let hash = HeaderHash::arbitrary(gen);
-        let init_msg = Message::Initial(ConfigParams::arbitrary_all_params(gen, discr));
-        let txs_msgs = txs.iter().cloned().map(Message::Transaction);
-        let messages: Vec<_> = iter::once(init_msg).chain(txs_msgs).collect();
-        Ledger::new(hash, &messages).expect("Failed to create arbitrary ledger")
     }
 }
