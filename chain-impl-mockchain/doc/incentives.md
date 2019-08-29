@@ -2,80 +2,56 @@
 
 ## Overview
 
-At each epoch transition, the goal is to incentivise the participants
-in the system : stake pools for their operating cost and their delegators
-for their individual stake contribution.
+The goal is to provide incentive to people to participate in the system : stake pools for their operating cost and their delegators for their individual stake contribution.
 
-Fees are collected on the duration of an epoch, from transactions (and other
-possible type of fees contributions) and deposited into a central rewards pot.
+The `Reward Escrow` is an amount defined in the genesis block and monotonically decreases till empty.
 
-Also, as further incentives, a defined amount per epoch is sourced from the
-reward escrow and contributed into the epoch rewards.
+A `Reward Escrow Deduction` is an amount deducted from the `Reward Escrow` at the end of each epoch and is used to fund `Epoch Reward`.  
 
-Once the reward amount is known, the treasury takes a contribution out of it
-and the remaining total is splitted and distributed according to individual
-pool block creation success rate. So each pool is assigned a certain share of
-the total.
+The `Epoch Reward` is accumulated during, then emptied at the end of every epoch. The `Epoch Reward` is composed of two parts:
+1. Transaction fees
+2. A `Reward Escrow Deduction` described in the above paragraph
 
-Once every pool shares are known, each share is further divided between the
-stake pool owners (representing their operating costs and incentives to run a
-public secure/working/maintained pool), and the individual contributing
-stake towards this specific pool.
+Once the epoch reward is known, the `Treasury` deducts a portion and the remaining amount is divided between pools proportional to successful slot creation rate. Each pool's share is further divided between pool owners and delegators proportional to their stake.
 
-    ┏━━━━━━━━━━━━━┓ 
+    ┏━━━━━━━━━━━━━┓
     ┃Reward Escrow┃
-    ┗━━━━━━━━━━━━━┛                    ╭ Block        ╭ 
+    ┗━━━━━━━━━━━━━┛                    ╭ Block        ╭
                │   ┏━━━━━━━━━━━━━┓     │ Creators     │  Stake
                ╞══>┃Epoch Rewards┃═╤═> │ For      ═╤═>│ Delegators
-               │   ┗━━━━━━━━━━━━━┛ │   │ This      │  ╰ 
-          Σ Fees                   │   ╰ Epoch     │  
-                                   │               ╰─>─ Pool Owners
-                                   │   ┏━━━━━━━━┓ 
+               │   ┗━━━━━━━━━━━━━┛ │   │ This      │  ╰
+            Σ Fees                 │   ╰ Epoch     │  ╭
+                                   │               ╰─>│ Pool Owners
+                                   │   ┏━━━━━━━━┓     ╰
                                    ╰─>─┃Treasury┃
-                                       ┗━━━━━━━━┛ 
+                                       ┗━━━━━━━━┛
 
 ## Reward collection
 
-### Reward Escrow
+Rewards follow a tried and tested model of high rewards and low fees at the start of the system, then as the `Reward Escrow` depletes, fees take over the rewarding of stakepools.
 
-A fix amount of total reward is commited at genesis time to rewards
-participants in the system. This is escrowed in a special account until it
-has been drained completely.
+### Reward Calculation
 
-At each epoch, a specific configurable amount if contributed towards the
-epoch rewards. As there's only a specific known amount of value in the system
-once this pot is depleted, then no contributions are made.
+Genesis creators have full control over the initial `Reward Escrow` amount, block rates and whether they wish an exponential or linear formula:
 
-The usual expectations is that at start of the system, the fees collected
-by usage (transactions, etc) is going to be small depending on adoption rate,
-so as early incentives to contribute into the network, the initial
-contribution starts at a specific value, then is reduce as time progress.
-
-Genesis creators have full control on the specific amount and rates,
-and each specific values are inscribed into block0 initial values.
-
-There's fundamentally many potential choices for how rewards are contributed back,
-and here's two potential valid examples:
-
-* Linear formula: `calc = C - rratio * (#epoch / erate)`
-* Halving formula: `calc = C * rratio ^ (#epoch / erate)`
+* Linear formula: `calc = f - rratio * (#epoch / erate)`
+* Halving formula: `calc = f * rratio ^ (#epoch / erate)`
 
 where
 
-* `C` is a constant representing the starting point of the contribution. note that it only gives the amount at epoch=0 in the special linear case.
-* `rratio` is the reducing ratio and need to between 0.0 and 1.0.
-  Further requirement is that this ratio is expressed in fractional form (e.g. 1/2),which allow calculation in integer form (see implementation details).
-  Intuitively, it represent the contribution reducing factor.
-* `erate` is the rate at which the contribution is reduce. e.g. erate=100 means that
+* `f` is a constant representing the starting amount of the `Reward Escrow`. In the linear formula `f` will always be the value at block0.
+* `rratio` is the reducing ratio and is bounded between 0.0 and 1.0.
+  A further requirement is that this ratio is expressed in fractional form (e.g. 1/2), which allows calculation in integer form (see implementation details). It represents the `Reward Escrow` reducing factor.
+* `erate` is the rate at which the `Reward Escrow` is reduced. e.g. erate=100 means that
   every 100 epochs, the calculation is reduce further.
 
-And the actual contribution into the epoch reward is:
+The `Reward Escrow Deduction` is:
 
-    contribution = MIN(reward_escrow, MAX(0, calc))
+    reward_escrow_deduction = MIN(reward_escrow, MAX(0, calc))
 
-The escrow amount is adjusted as such:
+The `Reward Escrow` amount is adjusted as such:
 
-    reward_escrow -= contribution
+    reward_escrow -= reward_escrow_deduction
 
 ### Epoch Fees
 
@@ -102,7 +78,7 @@ and then each pool get reward related by their stake in the system
 
     for each pool
         pool.account = DOWNSCALE(unit_reward * #pool.blocks_created)
-    
+
 Any non null amount could be arbitrarily gifted further to the treasury, or
 could be considered a bootstrap contribution toward the next epoch reward pot.
 
@@ -135,14 +111,14 @@ For each pool, we split each `pool.account` into a owner part and the stake rewa
 Note: The stake scaling is stronger here as the precision required is also more
 important here and the values can be much smaller than the previous algorithm.
 
-Note: We rewards an arbitrary owner of the pool with the 
+Note: We rewards an arbitrary owner of the pool with the
 
 ## General implementation details
 
 Every arithmetic operations are conducted on ℕ (natural numbers).
 
 All due care has been taken so that algorithm related to coins are lossless and
-implemented using fixed size unsigned integer. Overflow or underflow are 
+implemented using fixed size unsigned integer. Overflow or underflow are
 designed to not happens, and if they occur should be a fatal error and the
 result of using the wrong fixed size types.
 
